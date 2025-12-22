@@ -87,7 +87,8 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
-
+                        .requestMatchers("/chat/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/earthquakes/**").permitAll()
                         .requestMatchers(publicPaths).permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()

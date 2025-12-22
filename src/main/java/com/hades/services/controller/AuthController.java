@@ -34,9 +34,28 @@ public class AuthController {
     @Access.Public
     @PostMapping("/login")
     public ResponseEntity<User> login(@AuthenticationPrincipal String uid, Authentication authentication,
-            HttpServletResponse response, HttpServletRequest request) {
+            HttpServletResponse response, HttpServletRequest request,
+            @RequestBody(required = false) Map<String, String> payload) {
         try {
-            User user = userService.loginUser(uid);
+            // Try to find existing user
+            User user = userService.findByFirebaseUid(uid).orElse(null);
+
+            if (user == null && payload != null) {
+                // User exists in Firebase but not in our DB - auto-create
+                String email = payload.get("email");
+                String name = payload.get("name");
+                if (name == null || name.isEmpty()) {
+                    name = email != null ? email.split("@")[0] : "User";
+                }
+                if (email != null) {
+                    user = userService.registerUser(name, email, uid);
+                }
+            }
+
+            if (user == null) {
+                return ResponseEntity.notFound().build();
+            }
+
             setCookie(response, authentication, request);
             return ResponseEntity.ok(user);
         } catch (RuntimeException e) {
