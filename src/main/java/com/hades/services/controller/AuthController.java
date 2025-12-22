@@ -69,19 +69,40 @@ public class AuthController {
         }
     }
 
-    private void setCookie(HttpServletResponse response, Authentication authentication, HttpServletRequest request) {
-        if (authentication.getCredentials() instanceof String) {
-            String token = (String) authentication.getCredentials();
-            org.springframework.http.ResponseCookie cookie = org.springframework.http.ResponseCookie
-                    .from("hades_session", token)
-                    .httpOnly(true)
-                    .path("/")
-                    .maxAge(3600)
-                    .secure(request.isSecure())
-                    .sameSite("Lax")
-                    .build();
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(HttpServletResponse response) {
+        org.springframework.http.ResponseCookie cookie = org.springframework.http.ResponseCookie
+                .from("hades_session", "")
+                .httpOnly(true)
+                .path("/")
+                .maxAge(0) // Expire immediately
+                .sameSite("Lax")
+                .build();
 
-            response.addHeader(org.springframework.http.HttpHeaders.SET_COOKIE, cookie.toString());
+        response.addHeader(org.springframework.http.HttpHeaders.SET_COOKIE, cookie.toString());
+        return ResponseEntity.ok().build();
+    }
+
+    private void setCookie(HttpServletResponse response, Authentication authentication, HttpServletRequest request) {
+        String token = null;
+
+        // Try getting token from header first
+        String headerAuth = request.getHeader("Authorization");
+        if (headerAuth != null && headerAuth.startsWith("Bearer ")) {
+            token = headerAuth.substring(7);
         }
+        // Should never happen
+        if (token == null) {
+            throw new RuntimeException("No token found");
+        }
+        org.springframework.http.ResponseCookie cookie = org.springframework.http.ResponseCookie
+                .from("hades_session", token)
+                .httpOnly(true)
+                .path("/")
+                .maxAge(3600)
+                .sameSite("Lax")
+                .build();
+
+        response.addHeader(org.springframework.http.HttpHeaders.SET_COOKIE, cookie.toString());
     }
 }
