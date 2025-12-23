@@ -288,12 +288,33 @@ public class UserController {
     @PutMapping("/{id}/profile")
     public ResponseEntity<?> updateProfile(@PathVariable UUID id, @RequestBody Map<String, String> payload) {
         try {
+            Optional<User> targetUserOpt = userService.getById(id);
+            if (targetUserOpt.isEmpty()) {
+                return ResponseEntity.notFound().build();
+            }
+            User targetUser = targetUserOpt.get();
+
             String name = payload.get("name");
             String phone = payload.get("phone");
-            String organization = payload.get("organization");
+            String newOrganization = payload.get("organization");
             String address = payload.get("address");
 
-            User updated = userService.updateProfile(id, name, phone, organization, address);
+            // If user already has an organization, don't allow them to change it via
+            // profile
+            // They can only set it once. Changes must go through /users/{id}/organization
+            // by upper roles
+            String currentOrg = targetUser.getOrganization();
+            if (currentOrg != null && !currentOrg.trim().isEmpty()) {
+                // Keep existing organization, ignore the new value
+                newOrganization = currentOrg;
+            }
+
+            // ADMINs should not have organization
+            if (targetUser.getRole() == Role.ADMIN) {
+                newOrganization = null;
+            }
+
+            User updated = userService.updateProfile(id, name, phone, newOrganization, address);
 
             Map<String, Object> result = new HashMap<>();
             result.put("id", updated.getId());

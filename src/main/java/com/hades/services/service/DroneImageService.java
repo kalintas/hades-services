@@ -17,7 +17,8 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
-public class DroneImageService {
+public class
+DroneImageService {
 
     private final DroneImageRepository droneImageRepository;
 
