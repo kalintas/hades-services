@@ -48,7 +48,6 @@ public class DroneImage {
 
     private LocalDateTime uploadedAt = LocalDateTime.now();
 
-    @Column(nullable = false)
     private UUID uploadedBy;
 
     public DroneImage(UUID earthquakeId, UUID droneId, String neighborhood, String fileName, String filePath,

@@ -24,6 +24,10 @@ public class DroneService {
         return droneRepository.findAllByOrderByCreatedAtDesc();
     }
 
+    public List<Drone> getActiveDrones() {
+        return droneRepository.findByStatus(Drone.DroneStatus.ACTIVE);
+    }
+
     public List<Drone> search(String query) {
         return droneRepository.findByNameContainingIgnoreCaseOrModelContainingIgnoreCase(query, query);
     }

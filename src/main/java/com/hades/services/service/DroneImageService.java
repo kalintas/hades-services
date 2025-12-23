@@ -3,46 +3,35 @@ package com.hades.services.service;
 import com.hades.services.model.DroneImage;
 import com.hades.services.repository.DroneImageRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
-public class
-DroneImageService {
+public class DroneImageService {
 
     private final DroneImageRepository droneImageRepository;
+    private final AwsFileService awsFileService;
 
-    @Value("${app.upload.dir:uploads}")
-    private String uploadDir;
+    private static final String S3_PREFIX = "drone-images/";
 
     public DroneImage uploadImage(MultipartFile file, UUID earthquakeId, UUID droneId, String neighborhood, UUID userId)
             throws IOException {
-        // Create upload directory if it doesn't exist
-        Path uploadPath = Paths.get(uploadDir);
-        if (!Files.exists(uploadPath)) {
-            Files.createDirectories(uploadPath);
-        }
-
         // Generate unique filename
         String originalFileName = file.getOriginalFilename();
         String extension = originalFileName != null && originalFileName.contains(".")
                 ? originalFileName.substring(originalFileName.lastIndexOf("."))
                 : "";
         String uniqueFileName = UUID.randomUUID().toString() + extension;
+        String s3Key = S3_PREFIX + uniqueFileName;
 
-        // Save file to disk
-        Path filePath = uploadPath.resolve(uniqueFileName);
-        Files.copy(file.getInputStream(), filePath);
+        // Upload file to S3
+        awsFileService.uploadFile(s3Key, file.getBytes());
 
         // Save metadata to database
         DroneImage image = new DroneImage(
@@ -50,7 +39,7 @@ DroneImageService {
                 droneId,
                 neighborhood,
                 originalFileName,
-                filePath.toString(),
+                s3Key,
                 file.getSize(),
                 file.getContentType(),
                 userId);
@@ -83,12 +72,12 @@ DroneImageService {
 
     public void delete(UUID id) {
         droneImageRepository.findById(id).ifPresent(image -> {
-            // Delete file from disk
+            // Delete file from S3
             try {
-                Files.deleteIfExists(Paths.get(image.getFilePath()));
-            } catch (IOException e) {
+                awsFileService.deleteFile(image.getFilePath());
+            } catch (Exception e) {
                 // Log error but continue with database deletion
-                System.err.println("Failed to delete file: " + e.getMessage());
+                System.err.println("Failed to delete file from S3: " + e.getMessage());
             }
             droneImageRepository.deleteById(id);
         });

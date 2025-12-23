@@ -98,4 +98,14 @@ public class AwsFileService {
 
         System.out.println("Uploaded file to S3: " + filePath + ", ETag: " + response.eTag());
     }
+
+    public void deleteFile(String filePath) {
+        DeleteObjectRequest deleteObjectRequest = DeleteObjectRequest.builder()
+                .bucket(bucketName)
+                .key(filePath)
+                .build();
+
+        s3Client.deleteObject(deleteObjectRequest);
+        System.out.println("Deleted file from S3: " + filePath);
+    }
 }

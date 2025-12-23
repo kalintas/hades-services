@@ -10,4 +10,6 @@ public interface DroneRepository extends JpaRepository<Drone, UUID> {
     List<Drone> findByNameContainingIgnoreCaseOrModelContainingIgnoreCase(String name, String model);
 
     List<Drone> findAllByOrderByCreatedAtDesc();
+
+    List<Drone> findByStatus(Drone.DroneStatus status);
 }

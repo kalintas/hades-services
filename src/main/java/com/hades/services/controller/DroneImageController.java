@@ -5,7 +5,9 @@ import com.google.firebase.auth.FirebaseToken;
 import com.hades.services.model.DroneImage;
 import com.hades.services.model.User;
 import com.hades.services.repository.UserRepository;
+import com.hades.services.service.AwsFileService;
 import com.hades.services.service.DroneImageService;
+import com.hades.services.service.DroneService;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +23,9 @@ import java.util.*;
 public class DroneImageController {
 
     private final DroneImageService droneImageService;
+    private final DroneService droneService;
     private final UserRepository userRepository;
+    private final AwsFileService awsFileService;
 
     private UUID getUserIdFromRequest(HttpServletRequest request) {
         Cookie[] cookies = request.getCookies();
@@ -44,9 +48,11 @@ public class DroneImageController {
     }
 
     @GetMapping
-    public ResponseEntity<List<DroneImage>> getAll(
+    public ResponseEntity<Map<String, Object>> getAll(
             @RequestParam(required = false) UUID earthquakeId,
-            @RequestParam(required = false) UUID droneId) {
+            @RequestParam(required = false) UUID droneId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "12") int size) {
         List<DroneImage> images;
         if (earthquakeId != null) {
             images = droneImageService.getByEarthquake(earthquakeId);
@@ -55,7 +61,42 @@ public class DroneImageController {
         } else {
             images = droneImageService.getAll();
         }
-        return ResponseEntity.ok(images);
+
+        int totalElements = images.size();
+        int start = page * size;
+        int end = Math.min(start + size, totalElements);
+
+        List<DroneImage> paged = (start < totalElements) ? images.subList(start, end) : List.of();
+
+        // Add presigned URLs to responses
+        List<Map<String, Object>> result = paged.stream().map(img -> {
+            Map<String, Object> map = new HashMap<>();
+            map.put("id", img.getId());
+            map.put("earthquakeId", img.getEarthquakeId());
+            map.put("droneId", img.getDroneId());
+            map.put("neighborhood", img.getNeighborhood());
+            map.put("fileName", img.getFileName());
+            map.put("filePath", img.getFilePath());
+            map.put("uploadedAt", img.getUploadedAt());
+            map.put("status", img.getStatus());
+            // Generate presigned URL for viewing
+            try {
+                String presignedUrl = awsFileService.generateGetPresignedUrl(img.getFilePath());
+                map.put("imageUrl", presignedUrl);
+            } catch (Exception e) {
+                map.put("imageUrl", null);
+            }
+            return map;
+        }).toList();
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("images", result);
+        response.put("totalElements", totalElements);
+        response.put("page", page);
+        response.put("size", size);
+        response.put("hasMore", end < totalElements);
+
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/{id}")
@@ -100,5 +141,43 @@ public class DroneImageController {
         }
         droneImageService.delete(id);
         return ResponseEntity.ok().build();
+    }
+
+    // ============= Drone Simulation Endpoints =============
+
+    @GetMapping("/active-drones")
+    public ResponseEntity<List<Map<String, Object>>> getActiveDrones() {
+        List<Map<String, Object>> drones = droneService.getActiveDrones().stream()
+                .map(drone -> {
+                    Map<String, Object> map = new HashMap<>();
+                    map.put("id", drone.getId());
+                    map.put("name", drone.getName());
+                    map.put("model", drone.getModel());
+                    return map;
+                })
+                .toList();
+        return ResponseEntity.ok(drones);
+    }
+
+    @PostMapping("/drone-upload")
+    public ResponseEntity<?> droneUpload(
+            @RequestParam("files") MultipartFile[] files,
+            @RequestParam("earthquakeId") UUID earthquakeId,
+            @RequestParam("droneId") UUID droneId,
+            @RequestParam(value = "neighborhood", defaultValue = "Unknown") String neighborhood) {
+
+        try {
+            List<DroneImage> uploadedImages = new ArrayList<>();
+            for (MultipartFile file : files) {
+                // Use null for userId since this is a drone upload
+                DroneImage image = droneImageService.uploadImage(file, earthquakeId, droneId, neighborhood, null);
+                uploadedImages.add(image);
+            }
+            return ResponseEntity.ok(uploadedImages);
+        } catch (Exception e) {
+            System.err.println("Drone upload error: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(500).body("Drone upload failed: " + e.getMessage());
+        }
     }
 }
