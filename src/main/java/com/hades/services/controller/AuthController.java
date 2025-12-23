@@ -81,7 +81,7 @@ public class AuthController {
     @GetMapping("/me")
     public ResponseEntity<User> me(@AuthenticationPrincipal String uid) {
         try {
-            return userService.loginUser(uid)
+            return userService.findByFirebaseUid(uid)
                     .map(ResponseEntity::ok)
                     .orElse(ResponseEntity.status(401).build());
         } catch (RuntimeException e) {

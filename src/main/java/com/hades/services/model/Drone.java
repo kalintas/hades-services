@@ -44,6 +44,9 @@ public class Drone {
 
     private LocalDateTime createdAt = LocalDateTime.now();
 
+    @Column(name = "created_by")
+    private UUID createdBy;
+
     public Drone(String name, String model, String serialNumber) {
         this.name = name;
         this.model = model;

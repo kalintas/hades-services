@@ -32,6 +32,14 @@ public class User {
     @Column(nullable = false)
     private Role role;
 
+    @Column(name = "phone")
+    private String phone;
+
+    @Column(name = "organization")
+    private String organization;
+
+    @Column(name = "address")
+    private String address;
 
     public User(String name, String email, String firebaseUid, Role role) {
         this.name = name;

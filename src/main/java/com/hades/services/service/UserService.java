@@ -52,6 +52,29 @@ public class UserService {
         return userRepository.save(user);
     }
 
+    public User updateProfile(UUID userId, String name, String phone, String organization, String address) {
+        return userRepository.findById(userId).map(user -> {
+            if (name != null && !name.trim().isEmpty()) {
+                user.setName(name.trim());
+            }
+            user.setPhone(phone);
+            user.setOrganization(organization);
+            user.setAddress(address);
+            return userRepository.save(user);
+        }).orElseThrow(() -> new RuntimeException("User not found"));
+    }
+
+    public List<User> getByOrganization(String organization) {
+        return userRepository.findByOrganization(organization);
+    }
+
+    public User updateOrganization(UUID userId, String organization) {
+        return userRepository.findById(userId).map(user -> {
+            user.setOrganization(organization);
+            return userRepository.save(user);
+        }).orElseThrow(() -> new RuntimeException("User not found"));
+    }
+
     public void delete(UUID userId) {
         userRepository.deleteById(userId);
     }
