@@ -1,6 +1,7 @@
 package com.hades.services.controller;
 
 import com.hades.services.model.Earthquake;
+import com.hades.services.repository.DroneImageRepository;
 import com.hades.services.service.EarthquakeService;
 import jakarta.annotation.security.RolesAllowed;
 import lombok.RequiredArgsConstructor;
@@ -8,9 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 @RestController
 @RequestMapping("/earthquakes")
@@ -18,16 +17,37 @@ import java.util.UUID;
 public class EarthquakeController {
 
     private final EarthquakeService earthquakeService;
+    private final DroneImageRepository droneImageRepository;
 
     @GetMapping
-    public ResponseEntity<List<Earthquake>> getAll(@RequestParam(required = false) String search) {
+    public ResponseEntity<List<Map<String, Object>>> getAll(@RequestParam(required = false) String search) {
         List<Earthquake> earthquakes;
         if (search != null && !search.isBlank()) {
             earthquakes = earthquakeService.search(search);
         } else {
             earthquakes = earthquakeService.getAll();
         }
-        return ResponseEntity.ok(earthquakes);
+
+        // Add image counts from drone_images table
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Earthquake eq : earthquakes) {
+            Map<String, Object> eqMap = new HashMap<>();
+            eqMap.put("id", eq.getId());
+            eqMap.put("name", eq.getName());
+            eqMap.put("magnitude", eq.getMagnitude());
+            eqMap.put("location", eq.getLocation());
+            eqMap.put("date", eq.getDate());
+            eqMap.put("status", eq.getStatus());
+            eqMap.put("collapsed", eq.getCollapsed());
+            eqMap.put("damaged", eq.getDamaged());
+            eqMap.put("blocked", eq.getBlocked());
+            eqMap.put("createdAt", eq.getCreatedAt());
+            // Get actual image count from drone_images table
+            eqMap.put("images", droneImageRepository.countByEarthquakeId(eq.getId()));
+            result.add(eqMap);
+        }
+
+        return ResponseEntity.ok(result);
     }
 
     @GetMapping("/{id}")

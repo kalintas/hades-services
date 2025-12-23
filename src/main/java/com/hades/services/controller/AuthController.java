@@ -81,8 +81,9 @@ public class AuthController {
     @GetMapping("/me")
     public ResponseEntity<User> me(@AuthenticationPrincipal String uid) {
         try {
-            User user = userService.loginUser(uid);
-            return ResponseEntity.ok(user);
+            return userService.loginUser(uid)
+                    .map(ResponseEntity::ok)
+                    .orElse(ResponseEntity.status(401).build());
         } catch (RuntimeException e) {
             return ResponseEntity.status(401).build();
         }

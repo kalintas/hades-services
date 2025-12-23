@@ -89,6 +89,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/chat/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/earthquakes/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/drones/**").permitAll()
+                        .requestMatchers("/images/**").permitAll()
                         .requestMatchers(publicPaths).permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
