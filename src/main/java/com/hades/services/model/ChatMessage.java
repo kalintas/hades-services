@@ -31,14 +31,18 @@ public class ChatMessage {
     @Column(columnDefinition = "TEXT", nullable = false)
     private String content;
 
+    @Column(columnDefinition = "TEXT")
+    private String imageUrl;
+
     @Column(nullable = false)
     private LocalDateTime timestamp;
 
-    public ChatMessage(UUID sessionId, UUID userId, String role, String content) {
+    public ChatMessage(UUID sessionId, UUID userId, String role, String content, String imageUrl) {
         this.sessionId = sessionId;
         this.userId = userId;
         this.role = role;
         this.content = content;
+        this.imageUrl = imageUrl;
         this.timestamp = LocalDateTime.now();
     }
 }

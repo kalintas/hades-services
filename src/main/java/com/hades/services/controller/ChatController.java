@@ -125,6 +125,7 @@ public class ChatController {
             item.put("id", msg.getId().toString());
             item.put("role", msg.getRole());
             item.put("content", msg.getContent());
+            item.put("imageUrl", msg.getImageUrl());
             item.put("timestamp", msg.getTimestamp().toString());
             return item;
         }).toList();
@@ -140,7 +141,8 @@ public class ChatController {
             HttpServletRequest request) {
 
         String message = payload.get("message");
-        String responseText = chatService.generateResponse(message);
+        String image = payload.get("image");
+        String responseText = chatService.generateResponse(message, image);
 
         Optional<User> currentUser = getCurrentUser(request);
 
@@ -149,8 +151,8 @@ public class ChatController {
             Optional<ChatSession> session = chatService.getSession(sessionId);
             if (session.isPresent() && session.get().getUserId().equals(currentUser.get().getId())) {
                 // Save messages
-                chatService.saveMessage(sessionId, currentUser.get().getId(), "user", message);
-                chatService.saveMessage(sessionId, currentUser.get().getId(), "assistant", responseText);
+                chatService.saveMessage(sessionId, currentUser.get().getId(), "user", message, image);
+                chatService.saveMessage(sessionId, currentUser.get().getId(), "assistant", responseText, null);
 
                 // Update session title if it's the first message
                 List<ChatMessage> messages = chatService.getSessionMessages(sessionId);
@@ -176,7 +178,8 @@ public class ChatController {
             HttpServletRequest request) {
 
         String message = payload.get("message");
-        String responseText = chatService.generateResponse(message);
+        String image = payload.get("image");
+        String responseText = chatService.generateResponse(message, image);
 
         Map<String, String> response = new HashMap<>();
         response.put("response", responseText);

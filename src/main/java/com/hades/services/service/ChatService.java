@@ -47,8 +47,8 @@ public class ChatService {
     }
 
     // Message management
-    public ChatMessage saveMessage(UUID sessionId, UUID userId, String role, String content) {
-        ChatMessage message = new ChatMessage(sessionId, userId, role, content);
+    public ChatMessage saveMessage(UUID sessionId, UUID userId, String role, String content, String imageUrl) {
+        ChatMessage message = new ChatMessage(sessionId, userId, role, content, imageUrl);
         return chatMessageRepository.save(message);
     }
 
@@ -57,6 +57,13 @@ public class ChatService {
     }
 
     // Response generation (mock)
+    public String generateResponse(String message, String imageUrl) {
+        if (imageUrl != null && !imageUrl.isEmpty()) {
+            return "Resimde 3 tane hasarli bina goruyorum.";
+        }
+        return generateResponse(message);
+    }
+
     public String generateResponse(String message) {
         if (message == null) {
             return "Anlaşılmadı, lütfen tekrar edin.";

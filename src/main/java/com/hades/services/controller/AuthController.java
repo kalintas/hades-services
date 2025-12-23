@@ -78,6 +78,7 @@ public class AuthController {
         }
     }
 
+    @Access.Public
     @GetMapping("/me")
     public ResponseEntity<User> me(@AuthenticationPrincipal String uid) {
         try {
