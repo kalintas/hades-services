@@ -299,6 +299,15 @@ public class UserController {
             String newOrganization = payload.get("organization");
             String address = payload.get("address");
 
+            if (phone != null && !phone.isEmpty()) {
+                String digits = phone.replaceAll("\\D+", "");
+                if (digits.matches("^(?:90|0)?5\\d{9}$")) {
+                    phone = digits.replaceFirst("^(?:90|0)?(5\\d{2})(\\d{3})(\\d{2})(\\d{2})$", "$1 $2 $3 $4");
+                } else {
+                    return ResponseEntity.badRequest().body("Invalid phone number format");
+                }
+            }
+
             // If user already has an organization, don't allow them to change it via
             // profile
             // They can only set it once. Changes must go through /users/{id}/organization
