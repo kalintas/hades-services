@@ -1,0 +1,73 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - release
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-north-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Docker image
+        run: |
+          docker buildx build --platform linux/amd64 --provenance false -t hades-services:latest .
+
+      - name: Tag Docker image
+        run: |
+          docker tag hades-services:latest 470224090192.dkr.ecr.eu-north-1.amazonaws.com/hades/hades-services:latest
+
+      - name: Push Docker image to ECR
+        run: |
+          docker push 470224090192.dkr.ecr.eu-north-1.amazonaws.com/hades/hades-services:latest
+
+      - name: Setup SSH key for remote Docker
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+      - name: Add EC2 host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Create .env file
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          echo "$ENV_FILE" > .env
+
+      - name: Deploy using GitHub repo docker-compose
+        run: |
+          echo "Logging into ECR on remote Docker..."
+          aws ecr get-login-password --region eu-north-1 | docker login --username AWS --password-stdin 488120637104.dkr.ecr.eu-north-1.amazonaws.com
+
+          echo "Pulling latest Spring image..."
+          docker compose --env-file .env -f $GITHUB_WORKSPACE/docker-compose.yml pull spring
+
+          echo "Stopping old Spring container..."
+          docker compose --env-file .env -f $GITHUB_WORKSPACE/docker-compose.yml stop spring || true
+          docker compose --env-file .env -f $GITHUB_WORKSPACE/docker-compose.yml rm -f spring || true
+
+          echo "Starting new Spring container..."
+          docker compose --env-file .env -f $GITHUB_WORKSPACE/docker-compose.yml up -d --no-deps spring
+
+          echo "Cleaning up old images..."
+          docker image ls "470224090192.dkr.ecr.eu-north-1.amazonaws.com/hades/hades-services" -q | tail -n +2 | xargs -r docker rmi -f || true
+
