@@ -42,11 +42,6 @@ jobs:
           echo "${{ secrets.EC2_SSH_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
-      - name: Add EC2 host to known_hosts
-        run: |
-          mkdir -p ~/.ssh
-          chmod 644 ~/.ssh/known_hosts
-
       - name: Create .env file
         env:
           ENV_FILE: ${{ secrets.ENV_FILE }}
@@ -54,9 +49,11 @@ jobs:
           echo "$ENV_FILE" > .env
 
       - name: Deploy using GitHub repo docker-compose
+        env:
+          DOCKER_HOST: "ssh://ec2-user@${{ secrets.EC2_IP_ADDRESS }}"
         run: |
           echo "Logging into ECR on remote Docker..."
-          aws ecr get-login-password --region eu-north-1 | docker login --username AWS --password-stdin 488120637104.dkr.ecr.eu-north-1.amazonaws.com
+          aws ecr get-login-password --region eu-north-1 | docker login --username AWS --password-stdin 470224090192.dkr.ecr.eu-north-1.amazonaws.com
 
           echo "Pulling latest Spring image..."
           docker compose --env-file .env -f $GITHUB_WORKSPACE/docker-compose.yml pull spring
