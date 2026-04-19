@@ -1,6 +1,6 @@
 services:
   spring:
-    image: openjdk:21-jdk
+    image: 470224090192.dkr.ecr.eu-north-1.amazonaws.com/hades/hades-services:latest
     working_dir: /app
     volumes:
       - ./app:/app               # place your app.jar in ./app

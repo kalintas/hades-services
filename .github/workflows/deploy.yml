@@ -41,7 +41,7 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-
+          ssh-keyscan -H ${{ secrets.EC2_IP_ADDRESS }} >> ~/.ssh/known_hosts
       - name: Create .env file
         env:
           ENV_FILE: ${{ secrets.ENV_FILE }}
