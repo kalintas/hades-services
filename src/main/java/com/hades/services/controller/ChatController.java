@@ -32,7 +32,6 @@ public class ChatController {
     // ========== SESSION ENDPOINTS ==========
 
     @GetMapping("/sessions")
-    @Access.Public
     public ResponseEntity<List<Map<String, Object>>> getSessions(HttpServletRequest request) {
         Optional<User> currentUser = getCurrentUser(request);
 
@@ -54,7 +53,6 @@ public class ChatController {
     }
 
     @PostMapping("/sessions")
-    @Access.Public
     public ResponseEntity<Map<String, Object>> createSession(
             @RequestBody Map<String, String> payload,
             HttpServletRequest request) {
@@ -77,7 +75,6 @@ public class ChatController {
     }
 
     @DeleteMapping("/sessions/{sessionId}")
-    @Access.Public
     public ResponseEntity<Void> deleteSession(
             @PathVariable UUID sessionId,
             HttpServletRequest request) {
@@ -101,7 +98,6 @@ public class ChatController {
     // ========== MESSAGE ENDPOINTS ==========
 
     @GetMapping("/sessions/{sessionId}/messages")
-    @Access.Public
     public ResponseEntity<List<Map<String, Object>>> getSessionMessages(
             @PathVariable UUID sessionId,
             HttpServletRequest request) {
@@ -134,7 +130,6 @@ public class ChatController {
     }
 
     @PostMapping("/sessions/{sessionId}/messages")
-    @Access.Public
     public ResponseEntity<Map<String, String>> sendMessage(
             @PathVariable UUID sessionId,
             @RequestBody Map<String, String> payload,
