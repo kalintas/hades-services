@@ -24,6 +24,7 @@ services:
       AWS_BUCKET: ${AWS_BUCKET}
       SSL_KEY_STORE_PASSWORD: ${SSL_KEY_STORE_PASSWORD}
       SSL_KEY_ALIAS: ${SSL_KEY_ALIAS}
+      HADES_SERVICES_ALLOWED_ORIGINS: ${HADES_SERVICES_ALLOWED_ORIGINS}
     depends_on:
       - postgres
   postgres:
