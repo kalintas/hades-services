@@ -4,6 +4,10 @@ services:
     working_dir: /app
     volumes:
       - ./app:/app               # place your app.jar in ./app
+      - type: bind
+        source: /home/ec2-user/keystore.p12
+        target: /etc/ssl/private/keystore.p12
+        read_only: true
     command: ["java", "-jar", "app.jar"]
     ports:
       - "443:8443"
