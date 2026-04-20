@@ -97,7 +97,6 @@ public class AuthController {
                 .httpOnly(true)
                 .path("/")
                 .maxAge(0) // Expire immediately
-                .sameSite("Lax")
                 .build();
 
         response.addHeader(org.springframework.http.HttpHeaders.SET_COOKIE, cookie.toString());
@@ -122,7 +121,6 @@ public class AuthController {
                 .secure(true)
                 .path("/")
                 .maxAge(3600)
-                .sameSite("Lax")
                 .build();
 
         response.addHeader(org.springframework.http.HttpHeaders.SET_COOKIE, cookie.toString());
