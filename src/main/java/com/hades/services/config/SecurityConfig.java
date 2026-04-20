@@ -22,6 +22,9 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver;
+import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
+import jakarta.servlet.http.HttpServletRequest;
 
 import java.time.Instant;
 import java.util.HashMap;
@@ -69,6 +72,23 @@ public class SecurityConfig {
     }
 
     @Bean
+    public BearerTokenResolver bearerTokenResolver() {
+        DefaultBearerTokenResolver defaultResolver = new DefaultBearerTokenResolver();
+        com.hades.services.security.web.CookieBearerTokenResolver cookieResolver = new com.hades.services.security.web.CookieBearerTokenResolver();
+
+        return request -> {
+            // 1. Try standard Authorization header first (what Next.js sends)
+            String token = defaultResolver.resolve(request);
+            if (token != null) {
+                return token;
+            }
+
+            // 2. Fall back to Cookie (if needed for your other legacy endpoints)
+            return cookieResolver.resolve(request);
+        };
+    }
+
+    @Bean
     public SecurityFilterChain filterChain(HttpSecurity http, RequestMappingHandlerMapping handlerMapping)
             throws Exception {
         String[] publicPaths = handlerMapping.getHandlerMethods().entrySet().stream()
@@ -97,7 +117,7 @@ public class SecurityConfig {
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
-                        .bearerTokenResolver(new com.hades.services.security.web.CookieBearerTokenResolver())
+                        .bearerTokenResolver(bearerTokenResolver())
                         .jwt(jwt -> jwt
                                 .jwtAuthenticationConverter(firebaseAuthenticationTokenConverter)
                                 .decoder(jwtDecoder())));
