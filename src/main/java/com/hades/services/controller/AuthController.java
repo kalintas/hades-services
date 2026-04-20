@@ -119,6 +119,7 @@ public class AuthController {
         org.springframework.http.ResponseCookie cookie = org.springframework.http.ResponseCookie
                 .from("hades_session", token)
                 .httpOnly(true)
+                .secure(true)
                 .path("/")
                 .maxAge(3600)
                 .sameSite("Lax")
