@@ -2,6 +2,7 @@ package com.hades.services.controller;
 
 import com.hades.services.model.PresignedUrl;
 import com.hades.services.model.PresignedUrlRequest;
+import com.hades.services.security.annotation.Access;
 import com.hades.services.service.AwsFileService;
 import com.hades.services.service.UserService;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,7 @@ public class FileController {
     private static final Set<String> ALLOWED_FOLDERS = Set.of("reports", "chats");
 
     @PostMapping("/presigned-url")
+    @Access.Public
     public ResponseEntity<PresignedUrl> generateUrl(@AuthenticationPrincipal String uid,
             @RequestBody PresignedUrlRequest request) {
         if (request.getFileSize() > maxUploadBytes) {
