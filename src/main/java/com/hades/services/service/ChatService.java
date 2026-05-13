@@ -1,16 +1,25 @@
 package com.hades.services.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hades.core.dto.YoloParams;
 import com.hades.services.model.ChatMessage;
 import com.hades.services.model.ChatSession;
+import com.hades.services.model.YoloInference;
 import com.hades.services.repository.ChatMessageRepository;
 import com.hades.services.repository.ChatSessionRepository;
+import com.hades.services.repository.YoloInferenceRepository;
+import com.hades.services.service.sagemaker.YoloInferenceService;
+import com.hades.services.service.sagemaker.dto.SageMakerYoloResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 @Service
 @RequiredArgsConstructor
@@ -18,6 +27,13 @@ public class ChatService {
 
     private final ChatMessageRepository chatMessageRepository;
     private final ChatSessionRepository chatSessionRepository;
+    private final YoloInferenceService yoloInferenceService;
+    private final AwsFileService awsFileService;
+    private final ObjectMapper objectMapper;
+    private final YoloInferenceRepository yoloInferenceRepository;
+
+    @Value("${hades.content.domain}")
+    private String contentDomain;
 
     // Session management
     public ChatSession createSession(UUID userId, String title) {
@@ -49,7 +65,51 @@ public class ChatService {
     // Message management
     public ChatMessage saveMessage(UUID sessionId, UUID userId, String role, String content, String imageUrl) {
         ChatMessage message = new ChatMessage(sessionId, userId, role, content, imageUrl);
-        return chatMessageRepository.save(message);
+        ChatMessage savedMessage = chatMessageRepository.save(message);
+
+        if ("user".equals(role) && imageUrl != null && !imageUrl.isEmpty()) {
+            CompletableFuture.runAsync(() -> processYoloInference(savedMessage.getId(), imageUrl));
+        }
+
+        return savedMessage;
+    }
+
+    private void processYoloInference(UUID messageId, String imageUrl) {
+        try {
+            String contentUrlPrefix = "https://" + contentDomain + "/";
+            byte[] imageBytes = null;
+
+            if (imageUrl.startsWith(contentUrlPrefix)) {
+                String filePath = imageUrl.substring(contentUrlPrefix.length());
+                imageBytes = awsFileService.downloadFile(filePath);
+            } else if (imageUrl.startsWith("data:image")) {
+                String base64 = imageUrl.substring(imageUrl.indexOf(",") + 1);
+                imageBytes = Base64.getDecoder().decode(base64);
+            } else {
+                throw new IllegalArgumentException("Unsupported image URL format: " + imageUrl);
+            }
+
+            YoloParams params = new YoloParams();
+            SageMakerYoloResponse response = yoloInferenceService.infer(imageBytes, params);
+
+            YoloInference inference = new YoloInference();
+            inference.setMessageId(messageId);
+            inference.setDetectionsJson(objectMapper.writeValueAsString(response.detections()));
+            inference.setImageWidth(response.imageWidth());
+            inference.setImageHeight(response.imageHeight());
+            inference.setInferenceTimeMs(response.inferenceTimeMs());
+            inference.setError(response.error());
+
+            yoloInferenceRepository.save(inference);
+
+        } catch (Exception e) {
+            System.err.println("Failed to process YOLO inference for message " + messageId + ": " + e.getMessage());
+            e.printStackTrace();
+            YoloInference inference = new YoloInference();
+            inference.setMessageId(messageId);
+            inference.setError(e.getMessage());
+            yoloInferenceRepository.save(inference);
+        }
     }
 
     public List<ChatMessage> getSessionMessages(UUID sessionId) {

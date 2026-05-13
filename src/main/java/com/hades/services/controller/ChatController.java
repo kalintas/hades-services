@@ -138,6 +138,7 @@ public class ChatController {
         String message = payload.get("message");
         String image = payload.get("image");
         String responseText = chatService.generateResponse(message, image);
+        String sessionTitle = null;
 
         Optional<User> currentUser = getCurrentUser(request);
 
@@ -152,14 +153,17 @@ public class ChatController {
                 // Update session title if it's the first message
                 List<ChatMessage> messages = chatService.getSessionMessages(sessionId);
                 if (messages.size() <= 2) { // Just added first user + assistant message
-                    String title = message.length() > 30 ? message.substring(0, 30) + "..." : message;
-                    chatService.updateSessionTitle(sessionId, title);
+                    sessionTitle = message.length() > 30 ? message.substring(0, 30) + "..." : message;
+                    chatService.updateSessionTitle(sessionId, sessionTitle);
                 }
             }
         }
 
         Map<String, String> response = new HashMap<>();
         response.put("response", responseText);
+        if (sessionTitle != null) {
+            response.put("title", sessionTitle);
+        }
 
         return ResponseEntity.ok(response);
     }
