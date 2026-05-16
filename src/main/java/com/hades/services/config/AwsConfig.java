@@ -3,6 +3,8 @@ package com.hades.services.config;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.web.client.RestTemplate;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
@@ -31,6 +33,15 @@ public class AwsConfig {
     private String region;
 
     @Bean
+    public RestTemplate restTemplate() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        // Set timeouts to 30 minutes to match VLM requirements
+        factory.setConnectTimeout(10000); // 10 seconds
+        factory.setReadTimeout(1800000);  // 30 minutes in milliseconds
+        return new RestTemplate(factory);
+    }
+
+    @Bean
     public S3Client s3Client() {
         return S3Client.builder()
                 .region(Region.of(region))
@@ -54,32 +65,21 @@ public class AwsConfig {
                 .build();
     }
 
-    /**
-     * SageMaker client configured for long-running VLM inference:
-     *  - 300-second socket (read) timeout  → matches botocore read_timeout=300
-     *  - Retries disabled                  → matches botocore retries={'max_attempts': 0}
-     *
-     * Without this, the default AWS SDK timeout (~60 s) causes the backend to
-     * give up mid-inference and fire duplicate requests.
-     */
     @Bean
     public SageMakerRuntimeClient sageMakerRuntimeClient() {
-
-        // 1. Increase network layer timeouts to 30 minutes to survive VLM cold starts
         SdkHttpClient httpClient = ApacheHttpClient.builder()
-                .socketTimeout(Duration.ofMinutes(30))     // <-- Increased to 30 minutes
+                .socketTimeout(Duration.ofMinutes(30))
                 .connectionTimeout(Duration.ofSeconds(10))
                 .build();
 
-        // 2. Increase application layer (SDK) timeouts and disable retries
         ClientOverrideConfiguration overrideConfig = ClientOverrideConfiguration.builder()
-                .apiCallTimeout(Duration.ofMinutes(30))        // <-- ADDED: Total request timeout
-                .apiCallAttemptTimeout(Duration.ofMinutes(30)) // <-- ADDED: Single attempt timeout
-                .retryPolicy(RetryPolicy.none())               // Kept: No silent retries
+                .apiCallTimeout(Duration.ofMinutes(30))
+                .apiCallAttemptTimeout(Duration.ofMinutes(30))
+                .retryPolicy(RetryPolicy.none())
                 .build();
 
         return SageMakerRuntimeClient.builder()
-                .region(Region.of("us-east-1"))
+                .region(Region.of(region))
                 .credentialsProvider(
                         StaticCredentialsProvider.create(
                                 AwsBasicCredentials.create(accessKey, secretKey)
@@ -93,7 +93,6 @@ public class AwsConfig {
     @Bean
     public ObjectMapper objectMapper() {
         return new ObjectMapper()
-                // Prevents crashes if Python sends extra JSON fields we didn't map in our DTOs
                 .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     }
 }

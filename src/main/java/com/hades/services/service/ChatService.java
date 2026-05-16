@@ -1,7 +1,7 @@
 package com.hades.services.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hades.core.dto.YoloParams;
+import com.hades.services.service.sagemaker.dto.YoloParams;
 import com.hades.services.model.ChatMessage;
 import com.hades.services.model.ChatSession;
 import com.hades.services.model.YoloInference;

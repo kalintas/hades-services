@@ -1,4 +1,4 @@
-package com.hades.core.dto;
+package com.hades.services.service.sagemaker.dto;
 
 import lombok.Getter;
 import lombok.Setter;

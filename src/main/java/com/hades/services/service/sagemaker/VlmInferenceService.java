@@ -3,28 +3,22 @@ package com.hades.services.service.sagemaker;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hades.services.service.sagemaker.dto.SageMakerVlmRequest;
 import com.hades.services.service.sagemaker.dto.SageMakerVlmResponse;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import software.amazon.awssdk.services.sagemakerruntime.SageMakerRuntimeClient;
+import org.springframework.web.client.RestTemplate;
 
 import java.util.Base64;
 
 /**
- * Calls the hades-qwen3.5-vlm SageMaker endpoint.
- *
- * Endpoint name is read from {@code aws.sagemaker.endpoint.vlm} (env: AWS_SAGEMAKER_VLM_ENDPOINT).
+ * Calls the Colab/ngrok endpoint for VLM inference.
  */
 @Service
-public class VlmInferenceService extends AbstractSageMakerService<SageMakerVlmRequest, SageMakerVlmResponse> {
-
-    private final String endpointName;
+public class VlmInferenceService extends AbstractHttpInferenceService<SageMakerVlmRequest, SageMakerVlmResponse> {
 
     public VlmInferenceService(
+            RestTemplate restTemplate,
             ObjectMapper objectMapper,
-            SageMakerRuntimeClient sageMakerClient,
-            @Value("${aws.sagemaker.endpoint.vlm}") String endpointName) {
-        super(objectMapper, sageMakerClient);
-        this.endpointName = endpointName;
+            InferenceEndpointProvider endpointProvider) {
+        super(restTemplate, objectMapper, endpointProvider);
     }
 
     /**
@@ -48,12 +42,12 @@ public class VlmInferenceService extends AbstractSageMakerService<SageMakerVlmRe
             );
 
             String jsonPayload     = objectMapper.writeValueAsString(requestPayload);
-            String rawJsonResponse = invokeAwsEndpoint(endpointName, jsonPayload);
+            String rawJsonResponse = invokeHttpEndpoint(jsonPayload);
 
             return objectMapper.readValue(rawJsonResponse, SageMakerVlmResponse.class);
 
         } catch (Exception e) {
-            throw new RuntimeException("Failed to process VLM inference", e);
+            throw new RuntimeException("Failed to process VLM inference via Colab", e);
         }
     }
 }
