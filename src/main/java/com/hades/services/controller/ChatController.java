@@ -6,16 +6,19 @@ import com.hades.services.model.ChatMessage;
 import com.hades.services.model.ChatSession;
 import com.hades.services.model.User;
 import com.hades.services.service.ChatService;
+import com.hades.services.service.ChatSseService;
 import com.hades.services.service.UserService;
 import com.hades.services.security.annotation.Access;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.*;
 
@@ -25,8 +28,10 @@ import java.util.*;
 @RequiredArgsConstructor
 public class ChatController {
 
-    private final ChatService chatService;
-    private final UserService userService;
+    private final ChatService    chatService;
+    private final ChatSseService chatSseService;
+    private final UserService    userService;
+
     private static final String COOKIE_NAME = "hades_session";
 
     // ========== SESSION ENDPOINTS ==========
@@ -43,8 +48,8 @@ public class ChatController {
 
         List<Map<String, Object>> result = sessions.stream().map(session -> {
             Map<String, Object> item = new HashMap<>();
-            item.put("id", session.getId().toString());
-            item.put("title", session.getTitle());
+            item.put("id",        session.getId().toString());
+            item.put("title",     session.getTitle());
             item.put("createdAt", session.getCreatedAt().toString());
             return item;
         }).toList();
@@ -67,8 +72,8 @@ public class ChatController {
         ChatSession session = chatService.createSession(currentUser.get().getId(), title);
 
         Map<String, Object> result = new HashMap<>();
-        result.put("id", session.getId().toString());
-        result.put("title", session.getTitle());
+        result.put("id",        session.getId().toString());
+        result.put("title",     session.getTitle());
         result.put("createdAt", session.getCreatedAt().toString());
 
         return ResponseEntity.ok(result);
@@ -85,7 +90,6 @@ public class ChatController {
             return ResponseEntity.status(401).build();
         }
 
-        // Verify session belongs to user
         Optional<ChatSession> session = chatService.getSession(sessionId);
         if (session.isEmpty() || !session.get().getUserId().equals(currentUser.get().getId())) {
             return ResponseEntity.status(403).build();
@@ -93,6 +97,39 @@ public class ChatController {
 
         chatService.deleteSession(sessionId);
         return ResponseEntity.ok().build();
+    }
+
+    // ========== SSE STREAM ENDPOINT ==========
+
+    /**
+     * Client subscribes to this endpoint to receive the assistant response
+     * after sending an image message. The emitter is completed once the
+     * YOLO→VLM pipeline finishes and the assistant message is pushed.
+     *
+     * <p>Event name: {@code "assistant"} — payload: JSON with id, role, content, timestamp.</p>
+     * <p>Event name: {@code "error"}     — payload: JSON with error string.</p>
+     */
+    @GetMapping(value = "/sessions/{sessionId}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamSession(
+            @PathVariable UUID sessionId,
+            HttpServletRequest request) {
+
+        // Auth check — same guard as other session endpoints
+        Optional<User> currentUser = getCurrentUser(request);
+        if (currentUser.isEmpty()) {
+            SseEmitter rejected = new SseEmitter(0L);
+            rejected.completeWithError(new IllegalStateException("Unauthorized"));
+            return rejected;
+        }
+
+        Optional<ChatSession> session = chatService.getSession(sessionId);
+        if (session.isEmpty() || !session.get().getUserId().equals(currentUser.get().getId())) {
+            SseEmitter rejected = new SseEmitter(0L);
+            rejected.completeWithError(new IllegalStateException("Forbidden"));
+            return rejected;
+        }
+
+        return chatSseService.register(sessionId);
     }
 
     // ========== MESSAGE ENDPOINTS ==========
@@ -108,7 +145,6 @@ public class ChatController {
             return ResponseEntity.ok(List.of());
         }
 
-        // Verify session belongs to user
         Optional<ChatSession> session = chatService.getSession(sessionId);
         if (session.isEmpty() || !session.get().getUserId().equals(currentUser.get().getId())) {
             return ResponseEntity.status(403).build();
@@ -118,10 +154,10 @@ public class ChatController {
 
         List<Map<String, Object>> result = messages.stream().map(msg -> {
             Map<String, Object> item = new HashMap<>();
-            item.put("id", msg.getId().toString());
-            item.put("role", msg.getRole());
-            item.put("content", msg.getContent());
-            item.put("imageUrl", msg.getImageUrl());
+            item.put("id",        msg.getId().toString());
+            item.put("role",      msg.getRole());
+            item.put("content",   msg.getContent());
+            item.put("imageUrl",  msg.getImageUrl());
             item.put("timestamp", msg.getTimestamp().toString());
             return item;
         }).toList();
@@ -129,6 +165,18 @@ public class ChatController {
         return ResponseEntity.ok(result);
     }
 
+    /**
+     * Send a message in a session.
+     *
+     * <p><b>Text-only message (no image):</b> response is returned synchronously
+     * in the JSON body: {@code {"response": "..."}}</p>
+     *
+     * <p><b>Image message:</b> the user message is saved immediately and the
+     * YOLO→VLM pipeline starts asynchronously. The response is:
+     * {@code {"status": "processing", "userMessageId": "<uuid>"}}.
+     * The assistant message will arrive via the SSE stream
+     * ({@code GET /chat/sessions/{id}/stream}).</p>
+     */
     @PostMapping("/sessions/{sessionId}/messages")
     public ResponseEntity<Map<String, String>> sendMessage(
             @PathVariable UUID sessionId,
@@ -136,39 +184,47 @@ public class ChatController {
             HttpServletRequest request) {
 
         String message = payload.get("message");
-        String image = payload.get("image");
-        String responseText = chatService.generateResponse(message, image);
-        String sessionTitle = null;
+        String image   = payload.get("image");
 
         Optional<User> currentUser = getCurrentUser(request);
 
-        if (currentUser.isPresent()) {
-            // Verify session belongs to user
-            Optional<ChatSession> session = chatService.getSession(sessionId);
-            if (session.isPresent() && session.get().getUserId().equals(currentUser.get().getId())) {
-                // Save messages
-                chatService.saveMessage(sessionId, currentUser.get().getId(), "user", message, image);
-                chatService.saveMessage(sessionId, currentUser.get().getId(), "assistant", responseText, null);
-
-                // Update session title if it's the first message
-                List<ChatMessage> messages = chatService.getSessionMessages(sessionId);
-                if (messages.size() <= 2) { // Just added first user + assistant message
-                    sessionTitle = message.length() > 30 ? message.substring(0, 30) + "..." : message;
-                    chatService.updateSessionTitle(sessionId, sessionTitle);
-                }
-            }
+        if (currentUser.isEmpty()) {
+            return ResponseEntity.status(401).build();
         }
 
+        Optional<ChatSession> session = chatService.getSession(sessionId);
+        if (session.isEmpty() || !session.get().getUserId().equals(currentUser.get().getId())) {
+            return ResponseEntity.status(403).build();
+        }
+
+        UUID userId = currentUser.get().getId();
+
+        // Save user message first so it gets an ID and is visible in history
+        ChatMessage userMessage = chatService.saveMessage(sessionId, userId, "user", message, image);
+
+        // Load history excluding the just-saved user message
+        List<ChatMessage> history = chatService.getSessionMessages(sessionId).stream()
+                .filter(m -> !m.getId().equals(userMessage.getId()))
+                .toList();
+
+        // Update session title on first message
         Map<String, String> response = new HashMap<>();
-        response.put("response", responseText);
-        if (sessionTitle != null) {
-            response.put("title", sessionTitle);
+        if (history.isEmpty() && message != null && !message.isBlank()) {
+            String title = message.length() > 30 ? message.substring(0, 30) + "..." : message;
+            chatService.updateSessionTitle(sessionId, title);
+            response.put("title", title);
         }
+
+        // Fire YOLO (if image) + VLM — result arrives via SSE regardless of whether image is present
+        chatService.processVlmAsync(sessionId, userId, userMessage.getId(), message, image, history);
+
+        response.put("status",        "processing");
+        response.put("userMessageId", userMessage.getId().toString());
 
         return ResponseEntity.ok(response);
     }
 
-    // ========== LEGACY ENDPOINT (for anonymous users) ==========
+    // ========== LEGACY ENDPOINT (anonymous users — text only) ==========
 
     @PostMapping
     @Access.Public
@@ -177,8 +233,8 @@ public class ChatController {
             HttpServletRequest request) {
 
         String message = payload.get("message");
-        String image = payload.get("image");
-        String responseText = chatService.generateResponse(message, image);
+        // Anonymous users get the rule-based text response only
+        String responseText = chatService.generateTextResponse(message);
 
         Map<String, String> response = new HashMap<>();
         response.put("response", responseText);
@@ -189,7 +245,6 @@ public class ChatController {
     // ========== HELPER ==========
 
     private Optional<User> getCurrentUser(HttpServletRequest request) {
-        // First try SecurityContext
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 
         if (authentication != null && authentication.isAuthenticated()) {
@@ -200,7 +255,6 @@ public class ChatController {
             }
         }
 
-        // Fallback: manually parse cookie
         if (request.getCookies() != null) {
             Optional<String> token = Arrays.stream(request.getCookies())
                     .filter(c -> COOKIE_NAME.equals(c.getName()))

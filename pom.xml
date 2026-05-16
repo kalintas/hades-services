@@ -96,7 +96,10 @@
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>sagemakerruntime</artifactId>
-            <version>2.25.11</version> <!-- Use the latest 2.x version -->
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>apache-client</artifactId>
         </dependency>
 	</dependencies>
 

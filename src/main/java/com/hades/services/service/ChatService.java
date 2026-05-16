@@ -8,34 +8,52 @@ import com.hades.services.model.YoloInference;
 import com.hades.services.repository.ChatMessageRepository;
 import com.hades.services.repository.ChatSessionRepository;
 import com.hades.services.repository.YoloInferenceRepository;
+import com.hades.services.service.sagemaker.VlmInferenceService;
 import com.hades.services.service.sagemaker.YoloInferenceService;
+import com.hades.services.service.sagemaker.dto.SageMakerVlmRequest;
+import com.hades.services.service.sagemaker.dto.SageMakerVlmResponse;
+import com.hades.services.service.sagemaker.dto.SageMakerYoloDetection;
 import com.hades.services.service.sagemaker.dto.SageMakerYoloResponse;
+import com.hades.services.service.sagemaker.dto.VlmHistoryEntry;
+
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
+
 
 @Service
 @RequiredArgsConstructor
 public class ChatService {
 
-    private final ChatMessageRepository chatMessageRepository;
-    private final ChatSessionRepository chatSessionRepository;
-    private final YoloInferenceService yoloInferenceService;
-    private final AwsFileService awsFileService;
-    private final ObjectMapper objectMapper;
-    private final YoloInferenceRepository yoloInferenceRepository;
+    private static final Logger log = LoggerFactory.getLogger(ChatService.class);
+
+    private final ChatMessageRepository    chatMessageRepository;
+    private final ChatSessionRepository    chatSessionRepository;
+    private final YoloInferenceService     yoloInferenceService;
+    private final VlmInferenceService      vlmInferenceService;
+    private final AwsFileService           awsFileService;
+    private final ObjectMapper             objectMapper;
+    private final YoloInferenceRepository  yoloInferenceRepository;
+    private final ChatSseService           chatSseService;
 
     @Value("${hades.content.domain}")
     private String contentDomain;
 
+    // ─────────────────────────────────────────────────────────────────────────
     // Session management
+    // ─────────────────────────────────────────────────────────────────────────
+
     public ChatSession createSession(UUID userId, String title) {
         ChatSession session = new ChatSession(userId, title);
         return chatSessionRepository.save(session);
@@ -62,69 +80,136 @@ public class ChatService {
         });
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
     // Message management
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Saves a user message. If an image URL is attached, kicks off the
+     * YOLO → VLM async pipeline in the background.
+     *
+     * @param sessionId  target session (may be null for anonymous/legacy)
+     * @param userId     owning user
+     * @param role       "user" or "assistant"
+     * @param content    message text
+     * @param imageUrl   optional image URL or base-64 data URI
+     * @return the saved message
+     */
     public ChatMessage saveMessage(UUID sessionId, UUID userId, String role, String content, String imageUrl) {
         ChatMessage message = new ChatMessage(sessionId, userId, role, content, imageUrl);
-        ChatMessage savedMessage = chatMessageRepository.save(message);
-
-        if ("user".equals(role) && imageUrl != null && !imageUrl.isEmpty()) {
-            CompletableFuture.runAsync(() -> processYoloInference(savedMessage.getId(), imageUrl));
-        }
-
-        return savedMessage;
+        // YOLO + VLM are handled together in processVlmAsync, not here.
+        return chatMessageRepository.save(message);
     }
 
-    private void processYoloInference(UUID messageId, String imageUrl) {
-        try {
-            String contentUrlPrefix = "https://" + contentDomain + "/";
-            byte[] imageBytes = null;
+    /**
+     * Starts the async pipeline for any message (text-only or image).
+     *
+     * <ul>
+     *   <li>If {@code imageUrl} is non-blank: image is downloaded, YOLO runs (fault-tolerant),
+     *       and detections are injected as a [SİSTEM VERİSİ] block.</li>
+     *   <li>If {@code imageUrl} is blank/null: the pipeline skips the image/YOLO steps
+     *       and calls the VLM as a text-only conversation.</li>
+     *   <li>{@code history} is the ordered list of previous messages in this session
+     *       (excluding the current user message). It is serialised into the prompt.</li>
+     * </ul>
+     *
+     * The assistant reply is saved to the DB and pushed to the SSE stream when ready.
+     */
+    public void processVlmAsync(
+            UUID sessionId,
+            UUID userId,
+            UUID userMessageId,
+            String userMessage,
+            String imageUrl,
+            List<ChatMessage> history) {
 
-            if (imageUrl.startsWith(contentUrlPrefix)) {
-                String filePath = imageUrl.substring(contentUrlPrefix.length());
-                imageBytes = awsFileService.downloadFile(filePath);
-            } else if (imageUrl.startsWith("data:image")) {
-                String base64 = imageUrl.substring(imageUrl.indexOf(",") + 1);
-                imageBytes = Base64.getDecoder().decode(base64);
-            } else {
-                throw new IllegalArgumentException("Unsupported image URL format: " + imageUrl);
+        CompletableFuture.runAsync(() -> {
+            try {
+                byte[] imageBytes = null;
+
+                // ── 1. Image + YOLO (only when image is present) ────────────
+                String systemVeri = null;
+                boolean hasImage = imageUrl != null && !imageUrl.isBlank();
+
+                if (hasImage) {
+                    imageBytes = resolveImageBytes(imageUrl);
+
+                    try {
+                        YoloParams yoloParams = new YoloParams();
+                        SageMakerYoloResponse yoloResponse = yoloInferenceService.infer(imageBytes, yoloParams);
+
+                        // Persist the YOLO result
+                        YoloInference yoloRecord = new YoloInference();
+                        yoloRecord.setMessageId(userMessageId);
+                        yoloRecord.setError(yoloResponse.error());
+                        if (yoloResponse.error() != null) {
+                            System.err.println("[YOLO] Endpoint returned an error: " + yoloResponse.error());
+                        } else {
+                            yoloRecord.setDetectionsJson(objectMapper.writeValueAsString(yoloResponse.detections()));
+                            yoloRecord.setImageWidth(yoloResponse.imageWidth());
+                            yoloRecord.setImageHeight(yoloResponse.imageHeight());
+                            yoloRecord.setInferenceTimeMs(yoloResponse.inferenceTimeMs());
+                            if (yoloResponse.detections() != null && !yoloResponse.detections().isEmpty()) {
+                                systemVeri = buildSystemVeri(yoloResponse.detections());
+                            }
+                        }
+                        yoloInferenceRepository.save(yoloRecord);
+
+                    } catch (Exception yoloEx) {
+                        System.err.println("[YOLO] Could not reach inference endpoint — skipping sistem verisi injection. Cause: " + yoloEx.getMessage());
+                        YoloInference errRecord = new YoloInference();
+                        errRecord.setMessageId(userMessageId);
+                        errRecord.setError(yoloEx.getMessage());
+                        yoloInferenceRepository.save(errRecord);
+                    }
+                }
+
+                // ── 2. Build history list + optional YOLO block appended to prompt ──
+                List<VlmHistoryEntry> historyEntries = buildVlmHistory(history);
+
+                // Append YOLO [SİSTEM VERİSİ] block to the current user message if available
+                String prompt = (systemVeri != null && !systemVeri.isBlank())
+                        ? systemVeri + "\n\n" + userMessage
+                        : userMessage;
+
+                // ── 3. VLM inference ────────────────────────────────────────
+                SageMakerVlmRequest vlmRequest = new SageMakerVlmRequest(
+                        "", prompt, historyEntries, 2048, false);
+                SageMakerVlmResponse vlmResponse = vlmInferenceService.infer(imageBytes, vlmRequest);
+
+                String assistantContent;
+                if (vlmResponse.error() != null && !vlmResponse.error().isBlank()) {
+                    log.error("[VLM] Endpoint returned an error for session {}: {}", sessionId, vlmResponse.error());
+                    assistantContent = "Yanıt oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.";
+                } else {
+                    assistantContent = vlmResponse.response();
+                }
+
+                // ── 4. Save assistant message ────────────────────────────────
+                ChatMessage assistantMessage = chatMessageRepository.save(
+                        new ChatMessage(sessionId, userId, "assistant", assistantContent, null)
+                );
+
+                // ── 5. Push via SSE ──────────────────────────────────────────
+                chatSseService.pushAssistantMessage(sessionId, assistantMessage);
+
+            } catch (Exception e) {
+                log.error("[VLM] Async pipeline failed for session {}: {}", sessionId, e.getMessage(), e);
+                chatSseService.pushError(sessionId, "Mesaj işlenirken bir hata oluştu.");
             }
-
-            YoloParams params = new YoloParams();
-            SageMakerYoloResponse response = yoloInferenceService.infer(imageBytes, params);
-
-            YoloInference inference = new YoloInference();
-            inference.setMessageId(messageId);
-            inference.setDetectionsJson(objectMapper.writeValueAsString(response.detections()));
-            inference.setImageWidth(response.imageWidth());
-            inference.setImageHeight(response.imageHeight());
-            inference.setInferenceTimeMs(response.inferenceTimeMs());
-            inference.setError(response.error());
-
-            yoloInferenceRepository.save(inference);
-
-        } catch (Exception e) {
-            System.err.println("Failed to process YOLO inference for message " + messageId + ": " + e.getMessage());
-            e.printStackTrace();
-            YoloInference inference = new YoloInference();
-            inference.setMessageId(messageId);
-            inference.setError(e.getMessage());
-            yoloInferenceRepository.save(inference);
-        }
+        });
     }
+
 
     public List<ChatMessage> getSessionMessages(UUID sessionId) {
         return chatMessageRepository.findBySessionIdOrderByTimestampAsc(sessionId);
     }
 
-    // Response generation (mock)
-    public String generateResponse(String message, String imageUrl) {
-        if (imageUrl != null && !imageUrl.isEmpty()) {
-            return "Resimde 3 tane hasarli bina goruyorum.";
-        }
-        return generateResponse(message);
-    }
+    // ─────────────────────────────────────────────────────────────────────────
+    // Text-only rule-based response (synchronous, no image)
+    // ─────────────────────────────────────────────────────────────────────────
 
-    public String generateResponse(String message) {
+    public String generateTextResponse(String message) {
         if (message == null) {
             return "Anlaşılmadı, lütfen tekrar edin.";
         }
@@ -158,4 +243,50 @@ public class ChatService {
             return "Bu konuda size şu an yardımcı olamıyorum. 'Yardım' yazarak neler yapabileceğimi görebilirsiniz.";
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private byte[] resolveImageBytes(String imageUrl) {
+        if (imageUrl == null || imageUrl.isBlank()) return null;
+        String contentUrlPrefix = "https://" + contentDomain + "/";
+        if (imageUrl.startsWith(contentUrlPrefix)) {
+            String filePath = imageUrl.substring(contentUrlPrefix.length());
+            return awsFileService.downloadFile(filePath);
+        } else if (imageUrl.startsWith("data:image")) {
+            String base64 = imageUrl.substring(imageUrl.indexOf(",") + 1);
+            return Base64.getDecoder().decode(base64);
+        } else {
+            throw new IllegalArgumentException("Unsupported image URL format: " + imageUrl);
+        }
+    }
+
+    /**
+     * Converts previous ChatMessage turns into a list of VlmHistoryEntry for
+     * the VLM endpoint, preserving the role labels the model understands.
+     */
+    private List<VlmHistoryEntry> buildVlmHistory(List<ChatMessage> history) {
+        if (history == null || history.isEmpty()) return List.of();
+        List<VlmHistoryEntry> entries = new ArrayList<>(history.size());
+        for (ChatMessage msg : history) {
+            entries.add(new VlmHistoryEntry(msg.getRole(), msg.getContent()));
+        }
+        return entries;
+    }
+
+    /**
+     * Builds the [SİSTEM VERİSİ] injection block from YOLO detections.
+     */
+    private String buildSystemVeri(List<SageMakerYoloDetection> detections) {
+        String detectionLines = detections.stream()
+                .map(d -> String.format("- %s (güven: %.2f)", d.className(), d.confidence()))
+                .collect(Collectors.joining("\n"));
+
+        return "[SİSTEM VERİSİ]\n" +
+               "Tespit edilen nesneler:\n" +
+               detectionLines + "\n" +
+               "[/SİSTEM VERİSİ]";
+    }
+
 }
