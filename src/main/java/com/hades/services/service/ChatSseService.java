@@ -64,6 +64,9 @@ public class ChatSseService {
             payload.put("role",      message.getRole());
             payload.put("content",   message.getContent());
             payload.put("timestamp", message.getTimestamp().toString());
+            if (message.getDetectionsJson() != null) {
+                payload.put("detections", message.getDetectionsJson());
+            }
 
             String json = objectMapper.writeValueAsString(payload);
 
