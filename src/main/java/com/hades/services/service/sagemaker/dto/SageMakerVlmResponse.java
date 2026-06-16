@@ -31,8 +31,9 @@ public record SageMakerVlmResponse(
     ) {}
 
     public record Message(
-            @JsonProperty("role")    String role,
-            @JsonProperty("content") String content
+            @JsonProperty("role")              String role,
+            @JsonProperty("content")           String content,
+            @JsonProperty("reasoning_content") String reasoningContent
     ) {}
 
     public record Usage(

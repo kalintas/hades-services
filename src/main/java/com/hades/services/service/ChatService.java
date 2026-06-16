@@ -144,7 +144,10 @@ public class ChatService {
                         historyEntries, prompt, imageBytes, 2048, true);
                 SageMakerVlmResponse vlmResponse = vlmInferenceService.infer(imageBytes, vlmRequest);
 
-                String assistantContent = vlmResponse.choices().get(0).message().content();
+                String assistantContent = Optional.ofNullable(vlmResponse.choices().get(0).message().content())
+                        .filter(s -> !s.isBlank())
+                        .orElseGet(() -> Optional.ofNullable(vlmResponse.choices().get(0).message().reasoningContent())
+                                .orElse(""));
 
                 // ── 4. Match VLM boxes to YOLO masks ─────────────────────────
                 List<SageMakerYoloDetection> matchedDetections = new ArrayList<>();
@@ -178,8 +181,18 @@ public class ChatService {
     }
 
     public String generateTextResponse(String message) {
-        // ... (Synchronous rules omitted for brevity in scratch but I'll keep them in the real file)
-        return "Rules logic here..."; 
+        try {
+            SageMakerVlmRequest vlmRequest = vlmInferenceService.buildRequest(
+                    List.of(), message, null, 2048, true);
+            SageMakerVlmResponse vlmResponse = vlmInferenceService.infer(null, vlmRequest);
+            SageMakerVlmResponse.Message msg = vlmResponse.choices().get(0).message();
+            return Optional.ofNullable(msg.content())
+                    .filter(s -> !s.isBlank())
+                    .orElseGet(() -> Optional.ofNullable(msg.reasoningContent()).orElse(""));
+        } catch (Exception e) {
+            log.error("[VLM] generateTextResponse failed: {}", e.getMessage(), e);
+            throw new RuntimeException("Yanıt oluşturulamadı", e);
+        }
     }
 
     private byte[] resolveImageBytes(String imageUrl) {
