@@ -31,21 +31,20 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
-
 @Service
 @RequiredArgsConstructor
 public class ChatService {
 
     private static final Logger log = LoggerFactory.getLogger(ChatService.class);
 
-    private final ChatMessageRepository    chatMessageRepository;
-    private final ChatSessionRepository    chatSessionRepository;
-    private final YoloInferenceService     yoloInferenceService;
-    private final VlmInferenceService      vlmInferenceService;
-    private final AwsFileService           awsFileService;
-    private final ObjectMapper             objectMapper;
-    private final YoloInferenceRepository  yoloInferenceRepository;
-    private final ChatSseService           chatSseService;
+    private final ChatMessageRepository chatMessageRepository;
+    private final ChatSessionRepository chatSessionRepository;
+    private final YoloInferenceService yoloInferenceService;
+    private final VlmInferenceService vlmInferenceService;
+    private final AwsFileService awsFileService;
+    private final ObjectMapper objectMapper;
+    private final YoloInferenceRepository yoloInferenceRepository;
+    private final ChatSseService chatSseService;
 
     @Value("${hades.content.domain}")
     private String contentDomain;
@@ -153,10 +152,9 @@ public class ChatService {
                 List<SageMakerYoloDetection> matchedDetections = new ArrayList<>();
                 if (yoloResponse != null && yoloResponse.detections() != null) {
                     assistantContent = matchAndEnrichDetections(
-                        assistantContent, 
-                        yoloResponse.detections(), 
-                        matchedDetections
-                    );
+                            assistantContent,
+                            yoloResponse.detections(),
+                            matchedDetections);
                 }
 
                 // ── 5. Save assistant message ────────────────────────────────
@@ -196,7 +194,8 @@ public class ChatService {
     }
 
     private byte[] resolveImageBytes(String imageUrl) {
-        if (imageUrl == null || imageUrl.isBlank()) return null;
+        if (imageUrl == null || imageUrl.isBlank())
+            return null;
         String contentUrlPrefix = "https://" + contentDomain + "/";
         if (imageUrl.startsWith(contentUrlPrefix)) {
             String filePath = imageUrl.substring(contentUrlPrefix.length());
@@ -210,10 +209,27 @@ public class ChatService {
     }
 
     private List<VlmHistoryEntry> buildVlmHistory(List<ChatMessage> history) {
-        if (history == null || history.isEmpty()) return List.of();
+        if (history == null || history.isEmpty())
+            return List.of();
         List<VlmHistoryEntry> entries = new ArrayList<>(history.size());
         for (ChatMessage msg : history) {
-            entries.add(new VlmHistoryEntry(msg.getRole(), msg.getContent()));
+            String imgUrl = msg.getImageUrl();
+            if ("user".equals(msg.getRole()) && imgUrl != null && !imgUrl.isBlank()) {
+                // Re-embed the image so the VLM retains visual context in follow-up turns
+                try {
+                    byte[] imgBytes = resolveImageBytes(imgUrl);
+                    String b64 = java.util.Base64.getEncoder().encodeToString(imgBytes);
+                    List<com.hades.services.service.sagemaker.dto.VlmContentPart> parts = List.of(
+                            com.hades.services.service.sagemaker.dto.VlmContentPart.imageBase64(b64, "image/jpeg"),
+                            com.hades.services.service.sagemaker.dto.VlmContentPart.text(msg.getContent()));
+                    entries.add(VlmHistoryEntry.multimodal(msg.getRole(), parts));
+                } catch (Exception e) {
+                    log.warn("[VLM] Could not re-embed history image {}: {}", imgUrl, e.getMessage());
+                    entries.add(VlmHistoryEntry.text(msg.getRole(), msg.getContent()));
+                }
+            } else {
+                entries.add(VlmHistoryEntry.text(msg.getRole(), msg.getContent()));
+            }
         }
         return entries;
     }
@@ -224,26 +240,28 @@ public class ChatService {
                 .collect(Collectors.joining("\n"));
 
         return "[SİSTEM VERİSİ]\n" +
-               "Tespit edilen nesneler:\n" +
-               detectionLines + "\n" +
-               "[/SİSTEM VERİSİ]";
+                "Tespit edilen nesneler:\n" +
+                detectionLines + "\n" +
+                "[/SİSTEM VERİSİ]";
     }
 
     /**
-     * Matches bounding boxes in VLM text to YOLO detections and enriches the response.
+     * Matches bounding boxes in VLM text to YOLO detections and enriches the
+     * response.
      */
     private String matchAndEnrichDetections(
             String text,
             List<SageMakerYoloDetection> yoloDetections,
             List<SageMakerYoloDetection> matchedResults) {
 
-        if (text == null || yoloDetections == null || yoloDetections.isEmpty()) return text;
+        if (text == null || yoloDetections == null || yoloDetections.isEmpty())
+            return text;
 
-        // Strictly match: <ref>Label</ref><box>(y1, x1, y2, x2)</box> or [y1, x1, y2, x2]
+        // Strictly match: <ref>Label</ref><box>(y1, x1, y2, x2)</box> or [y1, x1, y2,
+        // x2]
         // This ensures we only replace boxes that are explicitly referenced as objects.
         java.util.regex.Pattern boxPattern = java.util.regex.Pattern.compile(
-                "<ref>(.*?)</ref>\\s*<box>\\s*\\(?(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)\\s*\\)?\\s*</box>"
-        );
+                "<ref>(.*?)</ref>\\s*<box>\\s*\\(?(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)\\s*\\)?\\s*</box>");
 
         java.util.regex.Matcher matcher = boxPattern.matcher(text);
         StringBuilder sb = new StringBuilder();
@@ -251,7 +269,7 @@ public class ChatService {
 
         while (matcher.find()) {
             sb.append(text, lastEnd, matcher.start());
-            
+
             String label = matcher.group(1);
             int x1 = Integer.parseInt(matcher.group(2));
             int y1 = Integer.parseInt(matcher.group(3));
@@ -275,13 +293,15 @@ public class ChatService {
         return sb.toString();
     }
 
-    private SageMakerYoloDetection findBestMatch(int x1, int y1, int x2, int y2, List<SageMakerYoloDetection> yoloDetections) {
+    private SageMakerYoloDetection findBestMatch(int x1, int y1, int x2, int y2,
+            List<SageMakerYoloDetection> yoloDetections) {
         SageMakerYoloDetection best = null;
         double maxIoU = 0.3; // Minimum overlap threshold
 
         for (SageMakerYoloDetection det : yoloDetections) {
             List<Integer> yBox = det.bbox();
-            if (yBox == null || yBox.size() < 4) continue;
+            if (yBox == null || yBox.size() < 4)
+                continue;
 
             // IoU Calculation - assuming same scale (0-1000 or pixels)
             double iou = calculateIoU(x1, y1, x2, y2, yBox.get(0), yBox.get(1), yBox.get(2), yBox.get(3));
