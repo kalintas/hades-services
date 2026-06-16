@@ -140,17 +140,11 @@ public class ChatService {
                         ? systemVeri + "\n\n" + userMessage
                         : userMessage;
 
-                SageMakerVlmRequest vlmRequest = new SageMakerVlmRequest(
-                        "", prompt, historyEntries, 2048, false);
+                SageMakerVlmRequest vlmRequest = vlmInferenceService.buildRequest(
+                        historyEntries, prompt, imageBytes, 2048, true);
                 SageMakerVlmResponse vlmResponse = vlmInferenceService.infer(imageBytes, vlmRequest);
 
-                String assistantContent;
-                if (vlmResponse.error() != null && !vlmResponse.error().isBlank()) {
-                    log.error("[VLM] Endpoint error for session {}: {}", sessionId, vlmResponse.error());
-                    assistantContent = "Yanıt oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.";
-                } else {
-                    assistantContent = vlmResponse.response();
-                }
+                String assistantContent = vlmResponse.choices().get(0).message().content();
 
                 // ── 4. Match VLM boxes to YOLO masks ─────────────────────────
                 List<SageMakerYoloDetection> matchedDetections = new ArrayList<>();
@@ -246,10 +240,10 @@ public class ChatService {
             sb.append(text, lastEnd, matcher.start());
             
             String label = matcher.group(1);
-            int y1 = Integer.parseInt(matcher.group(2));
-            int x1 = Integer.parseInt(matcher.group(3));
-            int y2 = Integer.parseInt(matcher.group(4));
-            int x2 = Integer.parseInt(matcher.group(5));
+            int x1 = Integer.parseInt(matcher.group(2));
+            int y1 = Integer.parseInt(matcher.group(3));
+            int x2 = Integer.parseInt(matcher.group(4));
+            int y2 = Integer.parseInt(matcher.group(5));
 
             SageMakerYoloDetection bestMatch = findBestMatch(x1, y1, x2, y2, yoloDetections);
 

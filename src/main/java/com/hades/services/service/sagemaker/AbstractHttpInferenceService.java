@@ -25,10 +25,13 @@ public abstract class AbstractHttpInferenceService<ParameterType, ReturnType> im
     }
 
     /**
-     * Hits the Colab/ngrok REST API.
+     * Hits the OpenAI-compatible vLLM REST API at POST /v1/chat/completions.
      */
     protected String invokeHttpEndpoint(String jsonPayload) {
-        String endpointUrl = endpointProvider.getVlmEndpoint();
+        String baseUrl = endpointProvider.getVlmEndpoint()
+                .replaceAll("/v1/chat/completions$", "")  // tolerate old S3 values that include the path
+                .replaceAll("/+$", "");                   // strip any trailing slashes
+        String endpointUrl = baseUrl + "/v1/chat/completions";
         logger.debug("Invoking HTTP endpoint: {}", endpointUrl);
 
         HttpHeaders headers = new HttpHeaders();
